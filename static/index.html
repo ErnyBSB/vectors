@@ -1,6 +1,453 @@
-static/
-index.html
-+581 -0
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Espaço de Embeddings 3D</title>
+<meta name="description" content="Visualização interativa de embeddings vetoriais reais em espaço 3D com sentence-transformers e UMAP.">
+<meta name="theme-color" content="#0a0c10">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230a0c10'/><circle cx='10' cy='10' r='3' fill='%235DCAA5'/><circle cx='22' cy='10' r='3' fill='%239d8ff5'/><circle cx='10' cy='22' r='3' fill='%23EF9F27'/><circle cx='22' cy='22' r='3' fill='%23e06fa0'/><line x1='16' y1='4' x2='16' y2='28' stroke='%23ffffff' stroke-width='0.8' stroke-opacity='0.15'/><line x1='4' y1='16' x2='28' y2='16' stroke='%23ffffff' stroke-width='0.8' stroke-opacity='0.15'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0a0c10;
+    --surface:  #111318;
+    --surface2: #181b22;
+    --border:   rgba(255,255,255,0.07);
+    --border2:  rgba(255,255,255,0.13);
+    --text:     #e8e6df;
+    --muted:    #6b6e78;
+    --accent:   #c8f064;
+    --accent2:  #64c8f0;
+    --red:      #e06fa0;
+    --mono:     'DM Mono', monospace;
+    --serif:    'Instrument Serif', serif;
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--mono); overflow: hidden; }
+
+  .shell { display: grid; grid-template-columns: 1fr 300px; grid-template-rows: 48px 1fr; height: 100vh; }
+
+  /* topbar */
+  .topbar {
+    grid-column: 1/-1;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .topbar-title { font-family: var(--serif); font-style: italic; font-size: 17px; letter-spacing: .01em; }
+  .topbar-tag   { font-size: 10px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; padding: 3px 8px; border: 1px solid var(--border2); border-radius: 4px; }
+  .topbar-spacer { flex: 1; }
+  .status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--muted);
+  }
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--muted); transition: background .3s;
+  }
+  .status-dot.ready   { background: var(--accent); }
+  .status-dot.loading { background: var(--accent2); animation: pulse 1s infinite; }
+  .status-dot.error   { background: var(--red); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* canvas */
+  #canvas-area { position: relative; overflow: hidden; background: var(--bg); cursor: grab; }
+  #canvas-area:active { cursor: grabbing; }
+  #cv { width: 100%; height: 100%; display: block; }
+
+  #tip {
+    position: absolute; pointer-events: none;
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 6px; padding: 7px 12px;
+    font-size: 12px; display: none; white-space: nowrap; letter-spacing: .04em;
+  }
+  #tip .tip-group { font-size: 10px; color: var(--muted); margin-top: 2px; letter-spacing: .1em; text-transform: uppercase; }
+
+  /* sidebar */
+  .sidebar {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-label   { font-size: 10px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 10px; }
+
+  /* add term */
+  .add-row { display: flex; gap: 6px; }
+  .add-input {
+    flex: 1; background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 4px; color: var(--text); font-family: var(--mono);
+    font-size: 12px; padding: 6px 10px; outline: none;
+    transition: border-color .15s;
+  }
+  .add-input:focus { border-color: rgba(255,255,255,0.3); }
+  .add-input::placeholder { color: var(--muted); }
+
+  select.add-select {
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 4px; color: var(--muted); font-family: var(--mono);
+    font-size: 11px; padding: 6px 8px; outline: none; cursor: pointer;
+  }
+  select.add-select:focus { border-color: rgba(255,255,255,0.3); }
+  
+  .add-btn {
+    background: var(--accent); color: #0a0c10; font-family: var(--mono);
+    font-size: 11px; font-weight: 500; border: none; border-radius: 4px;
+    padding: 6px 12px; cursor: pointer; letter-spacing: .05em;
+    transition: opacity .15s;
+  }
+  .add-btn:hover   { opacity: .85; }
+  .add-btn:disabled { opacity: .4; cursor: default; }
+
+  .add-hint { font-size: 10px; color: var(--muted); margin-top: 7px; }
+
+  /* terms list */
+  .terms-scroll { max-height: 160px; overflow-y: auto; }
+  .terms-scroll::-webkit-scrollbar { width: 3px; }
+  .terms-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .term-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 0; border-bottom: 1px solid var(--border);
+  }
+  .term-item:last-child { border-bottom: none; }
+  .term-dot  { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .term-word { font-size: 12px; flex: 1; }
+  .term-group { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .term-rm {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 0 2px;
+    transition: color .15s;
+  }
+  .term-rm:hover { color: var(--red); }
+  .terms-empty { font-size: 11px; color: var(--muted); padding: 4px 0; }
+
+  .clear-btn {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
+    color: var(--muted); background: transparent;
+    border: 1px solid var(--border2); border-radius: 4px;
+    padding: 4px 9px; cursor: pointer; transition: all .15s;
+    text-transform: uppercase; margin-top: 10px;
+  }
+  .clear-btn:hover { color: var(--red); border-color: var(--red); }
+
+  /* viz toggles */
+  .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tbtn {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .08em;
+    color: var(--muted); background: transparent;
+    border: 1px solid var(--border2); border-radius: 4px;
+    padding: 4px 9px; cursor: pointer; transition: all .15s;
+    text-transform: uppercase;
+  }
+  .tbtn:hover { color: var(--text); background: var(--surface2); }
+  .tbtn.on    { color: var(--accent); border-color: var(--accent); background: rgba(200,240,100,.06); }
+
+  /* sim panel */
+  .sim-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; }
+  .sim-scroll::-webkit-scrollbar { width: 3px; }
+  .sim-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .sim-empty { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .sim-title { font-size: 11px; color: var(--muted); letter-spacing: .08em; margin-bottom: 12px; text-transform: uppercase; }
+  .sim-word  { font-family: var(--serif); font-style: italic; font-size: 20px; margin-bottom: 14px; display: block; }
+
+  .sim-row     { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .sim-name    { font-size: 11px; min-width: 68px; }
+  .sim-bar-wrap { flex: 1; height: 2px; background: var(--border); border-radius: 1px; overflow: hidden; }
+  .sim-bar-fill { height: 100%; border-radius: 1px; transition: width .4s cubic-bezier(.4,0,.2,1); }
+  .sim-num     { font-size: 10px; color: var(--muted); min-width: 38px; text-align: right; }
+
+  /* info bar */
+  .info-bar {
+    padding: 9px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 10px; color: var(--muted); line-height: 1.7;
+  }
+  .info-bar em { color: var(--accent2); font-style: normal; }
+
+  @media (max-width: 640px) {
+    .shell { grid-template-columns: 1fr; grid-template-rows: 48px 1fr 300px; }
+    .sidebar { border-left: none; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="topbar">
+    <span class="topbar-title">Espaço de Embeddings</span>
+    <span class="topbar-tag">Real · UMAP · 3D</span>
+    <span class="topbar-spacer"></span>
+    <div class="status">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">aguardando</span>
+    </div>
+  </header>
+
+  <div id="canvas-area">
+    <canvas id="cv"></canvas>
+    <div id="tip"><span id="tip-word"></span><div class="tip-group" id="tip-group"></div></div>
+  </div>
+
+  <aside class="sidebar">
+
+    <!-- add term -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Adicionar termo</div>
+      <div class="add-row">
+        <input class="add-input" id="term-input" type="text" placeholder="ex: justiça, nuvem, piano…" autocomplete="off">
+        <select class="add-select" id="group-select">
+          <option value="custom">custom</option>
+          <option value="animais">animais</option>
+          <option value="tecnologia">tecnologia</option>
+          <option value="culinária">culinária</option>
+          <option value="emoções">emoções</option>
+        </select>
+        <button class="add-btn" id="add-btn">+</button>
+      </div>
+      <div class="add-hint">vírgula ou Enter para múltiplos termos</div>
+    </div>
+
+    <!-- terms list -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Termos activos (<span id="term-count">0</span>)</div>
+      <div class="terms-scroll" id="terms-list">
+        <div class="terms-empty">Nenhum termo adicionado.</div>
+      </div>
+      <button class="clear-btn" id="clear-btn">limpar tudo</button>
+    </div>
+
+    <!-- viz toggles -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Visualização</div>
+      <div class="btn-row">
+        <button class="tbtn on" id="btn-rotate"  onclick="toggleOpt('rotate')">auto-rotação</button>
+        <button class="tbtn on" id="btn-axes"    onclick="toggleOpt('axes')">eixos</button>
+        <button class="tbtn on" id="btn-lines"   onclick="toggleOpt('lines')">origens</button>
+        <button class="tbtn on" id="btn-sim"     onclick="toggleOpt('simlines')">similaridade</button>
+        <button class="tbtn"    onclick="resetView()">reset view</button>
+      </div>
+    </div>
+
+    <!-- sim panel -->
+    <div class="sim-scroll" id="sim-panel">
+      <p class="sim-empty">Adicione termos e clique num ponto para ver a similaridade coseno com os vizinhos.<br><br>Os embeddings são gerados por <em style="color:var(--accent2)">paraphrase-multilingual-MiniLM-L12-v2</em> (384D → UMAP 3D).</p>
+    </div>
+
+    <div class="info-bar">
+      Modelo: <em>multilingual MiniLM</em> · <em>384D</em><br>
+      Redução: <em>UMAP coseno</em> · Similaridade: <em>coseno</em>
+    </div>
+
+  </aside>
+</div>
+
+<script>
+// ── state ─────────────────────────────────────────────────────────
+let pts = [], selected = null, hovered = null;
+let rotX = 0.42, rotY = 0.55, zoom = 1;
+let drag = false, lastMX = 0, lastMY = 0;
+let opts = { rotate: true, axes: true, lines: true, simlines: true };
+
+// ── canvas ────────────────────────────────────────────────────────
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const area = document.getElementById('canvas-area');
+const tip  = document.getElementById('tip');
+
+// ── status ────────────────────────────────────────────────────────
+function setStatus(state, text) {
+  const dot = document.getElementById('status-dot');
+  dot.className = 'status-dot ' + state;
+  document.getElementById('status-text').textContent = text;
+}
+
+// ── projection ────────────────────────────────────────────────────
+function project(x, y, z) {
+  const W = cv.width, H = cv.height;
+  const cx = Math.cos(rotX), sx = Math.sin(rotX);
+  const cy = Math.cos(rotY), sy = Math.sin(rotY);
+  const y2 = y*cx - z*sx, z2 = y*sx + z*cx;
+  const x3 = x*cy + z2*sy, z3 = -x*sy + z2*cy;
+  const sc = Math.min(W, H) * 0.26 * zoom;
+  const fov = 3.8, d = fov / (fov + z3);
+  return [W/2 + x3*sc*d, H/2 - y2*sc*d, z3, d];
+}
+
+// ── cosine similarity ─────────────────────────────────────────────
+function cos(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+// ── draw ──────────────────────────────────────────────────────────
+function draw() {
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 48) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 48) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  if (opts.axes) {
+    const axDef = [['X',[1.9,0,0],'#E24B4A'],['Y',[0,1.9,0],'#3cba79'],['Z',[0,0,1.9],'#378ADD']];
+    const [ox, oy] = project(0, 0, 0);
+    axDef.forEach(([lbl, [ex,ey,ez], col]) => {
+      const [px, py] = project(ex, ey, ez);
+      ctx.beginPath(); ctx.moveTo(ox,oy); ctx.lineTo(px,py);
+      ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.globalAlpha = .35; ctx.stroke();
+      ctx.globalAlpha = .55; ctx.fillStyle = col;
+      ctx.font = '500 11px "DM Mono", monospace';
+      ctx.fillText(lbl, px+5, py+4);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  if (!pts.length) return;
+
+  const sorted = [...pts].sort((a, b) => project(b.x,b.y,b.z)[2] - project(a.x,a.y,a.z)[2]);
+
+  if (opts.lines) {
+    const [ox, oy] = project(0, 0, 0);
+    sorted.forEach(p => {
+      const [px, py,, d] = project(p.x, p.y, p.z);
+      ctx.beginPath(); ctx.moveTo(ox,oy); ctx.lineTo(px,py);
+      ctx.strokeStyle = p.color; ctx.lineWidth = 0.7;
+      ctx.globalAlpha = 0.12 * Math.max(0.3, d);
+      ctx.stroke(); ctx.globalAlpha = 1;
+    });
+  }
+
+  if (opts.simlines && selected) {
+    const [sx, sy] = project(selected.x, selected.y, selected.z);
+    sorted.forEach(p => {
+      if (p === selected) return;
+      const sim = cos(selected.vec, p.vec);
+      if (sim > 0.5) {
+        const [px, py] = project(p.x, p.y, p.z);
+        ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(px,py);
+        ctx.strokeStyle = `rgba(100,200,240,${(sim-.5)*1.9})`;
+        ctx.lineWidth = sim * 2.8; ctx.stroke();
+      }
+    });
+  }
+  
+  const [ox, oy] = project(0, 0, 0);
+  ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fill();
+
+  sorted.forEach(p => {
+    const [px, py,, d] = project(p.x, p.y, p.z);
+    const isSel = p === selected, isHov = p === hovered;
+    const r = (isSel ? 10 : isHov ? 8 : 5.5) * Math.max(0.55, d * 0.85);
+    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI*2);
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = isSel ? 1 : 0.75 * Math.max(0.35, d * 0.75);
+    ctx.fill(); ctx.globalAlpha = 1;
+    if (isSel || isHov) {
+      ctx.strokeStyle = isSel ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    if (isSel) {
+      ctx.fillStyle = '#fff';
+      ctx.font = '500 12px "DM Mono", monospace';
+      ctx.globalAlpha = .9;
+      ctx.fillText(p.word, px + r + 5, py + 4);
+      ctx.globalAlpha = 1;
+    }
+  });
+}
+
+// ── nearest hit ───────────────────────────────────────────────────
+function nearest(mx, my) {
+  let best = null, bestD = 9999;
+  pts.forEach(p => {
+    const [px, py,, d] = project(p.x, p.y, p.z);
+    const dist = Math.hypot(mx - px, my - py);
+    if (dist < 6 * Math.max(0.5, d * 0.8) + 7 && dist < bestD) { bestD = dist; best = p; }
+  });
+  return best;
+}
+
+// ── similarity panel ──────────────────────────────────────────────
+function updateSim() {
+  const panel = document.getElementById('sim-panel');
+  if (!selected) {
+    panel.innerHTML = '<p class="sim-empty">Clique num ponto para ver a similaridade coseno com os vizinhos.<br><br>Similaridade calculada nos vectores originais de <em style="color:var(--accent2)">384D</em>, não nas coordenadas 3D.</p>';
+    return;
+  }
+  const sims = pts.filter(q => q !== selected).map(q => ({ q, sim: cos(selected.vec, q.vec) }));
+  sims.sort((a, b) => b.sim - a.sim);
+  let html = `<div class="sim-title">Similaridade coseno</div><span class="sim-word">${selected.word}</span>`;
+  sims.slice(0, 7).forEach(({ q, sim }) => {
+    const pct = Math.round(Math.max(0, sim) * 100);
+    html += `<div class="sim-row">
+      <span class="sim-name" style="color:${q.color}">${q.word}</span>
+      <div class="sim-bar-wrap"><div class="sim-bar-fill" style="width:${pct}%;background:${q.color}"></div></div>
+      <span class="sim-num">${sim.toFixed(3)}</span>
+    </div>`;
+  });
+  panel.innerHTML = html;
+}
+
+// ── terms list ────────────────────────────────────────────────────
+function renderTerms() {
+  const el = document.getElementById('terms-list');
+  document.getElementById('term-count').textContent = pts.length;
+  if (!pts.length) {
+    el.innerHTML = '<div class="terms-empty">Nenhum termo adicionado.</div>';
+    return;
+  }
+  el.innerHTML = pts.map(p => `
+    <div class="term-item">
+      <span class="term-dot" style="background:${p.color}"></span>
+      <span class="term-word">${p.word}</span>
+      <span class="term-group">${p.group}</span>
+      <button class="term-rm" onclick="removeTerm('${p.word.replace(/'/g,"\\'")}')">×</button>
+    </div>`).join('');
+}
+
+// ── API calls ─────────────────────────────────────────────────────
+async function apiFetch(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+function applyPoints(data) {
+  pts = data.points || [];
+  if (selected) selected = pts.find(p => p.word === selected.word) || null;
+  renderTerms();
+  updateSim();
+  draw();
+}
+
+async function addTerms(words, group) {
+  if (!words.length) return;
+  setStatus('loading', 'gerando embeddings…');
+  document.getElementById('add-btn').disabled = true;
+  try {
+    const data = await apiFetch('POST', '/api/embed', {
+      terms: words.map(w => ({ word: w, group }))
+    });
+    applyPoints(data);
+    setStatus('ready', `${pts.length} ponto${pts.length !== 1 ? 's' : ''}`);
+  } catch (e) {
+    setStatus('error', 'erro na API');
     console.error(e);
   } finally {
     document.getElementById('add-btn').disabled = false;
