@@ -105,12 +105,7 @@
 
   .add-bottom-row { display: flex; gap: 6px; }
 
-  select.add-select {
-    background: var(--surface2); border: 1px solid var(--border2);
-    border-radius: 4px; color: var(--muted); font-family: var(--mono);
-    font-size: 11px; padding: 6px 8px; outline: none; cursor: pointer;
-  }
-  select.add-select:focus { border-color: rgba(255,255,255,0.3); }
+  .add-label-input.error { border-color: var(--red); }
 
   .add-btn {
     flex: 1; background: var(--accent); color: #0a0c10; font-family: var(--mono);
@@ -135,7 +130,6 @@
   .term-item:last-child { border-bottom: none; }
   .term-dot  { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .term-word { font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .term-group { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; flex-shrink: 0; }
   .term-rm {
     background: none; border: none; color: var(--muted); cursor: pointer;
     font-size: 14px; line-height: 1; padding: 0 2px; flex-shrink: 0;
@@ -222,16 +216,9 @@
     <div class="sidebar-section">
       <div class="sidebar-label">Adicionar texto</div>
       <div class="add-col">
-        <input class="add-label-input" id="label-input" type="text" placeholder="rótulo (opcional)" autocomplete="off">
+        <input class="add-label-input" id="label-input" type="text" placeholder="rótulo *" autocomplete="off">
         <textarea class="add-textarea" id="term-input" placeholder="Cole aqui uma frase, parágrafo ou texto…" rows="4"></textarea>
         <div class="add-bottom-row">
-          <select class="add-select" id="group-select">
-            <option value="custom">custom</option>
-            <option value="animais">animais</option>
-            <option value="tecnologia">tecnologia</option>
-            <option value="culinária">culinária</option>
-            <option value="emoções">emoções</option>
-          </select>
           <button class="add-btn" id="add-btn">+ adicionar</button>
         </div>
       </div>
@@ -278,6 +265,7 @@ let pts = [], selected = null, hovered = null;
 let rotX = 0.42, rotY = 0.55, zoom = 1;
 let drag = false, lastMX = 0, lastMY = 0;
 let opts = { rotate: true, axes: true, lines: true, simlines: true };
+const labelMap = new Map(); // fullText → rótulo
 
 // ── canvas ────────────────────────────────────────────────────────
 const cv  = document.getElementById('cv');
@@ -286,9 +274,8 @@ const area = document.getElementById('canvas-area');
 const tip  = document.getElementById('tip');
 
 // ── helpers ───────────────────────────────────────────────────────
-function shortLabel(text, maxLen = 32) {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > maxLen ? flat.slice(0, maxLen) + '…' : flat;
+function getLabel(word) {
+  return labelMap.get(word) || word;
 }
 
 // ── status ────────────────────────────────────────────────────────
@@ -386,13 +373,11 @@ function draw() {
       ctx.strokeStyle = isSel ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)';
       ctx.lineWidth = 1.5; ctx.stroke();
     }
-    if (isSel) {
-      ctx.fillStyle = '#fff';
-      ctx.font = '500 12px "DM Mono", monospace';
-      ctx.globalAlpha = .9;
-      ctx.fillText(shortLabel(p.word), px + r + 5, py + 4);
-      ctx.globalAlpha = 1;
-    }
+    ctx.font = `${isSel ? '500' : '300'} 12px "DM Mono", monospace`;
+    ctx.fillStyle = isSel ? '#fff' : p.color;
+    ctx.globalAlpha = isSel ? .95 : 0.7 * Math.max(0.4, d * 0.75);
+    ctx.fillText(getLabel(p.word), px + r + 5, py + 4);
+    ctx.globalAlpha = 1;
   });
 }
 
@@ -416,13 +401,11 @@ function updateSim() {
   }
   const sims = pts.filter(q => q !== selected).map(q => ({ q, sim: cos(selected.vec, q.vec) }));
   sims.sort((a, b) => b.sim - a.sim);
-  const selLabel = shortLabel(selected.word);
-  let html = `<div class="sim-title">Similaridade coseno</div><span class="sim-word">${selLabel}</span>`;
+  let html = `<div class="sim-title">Similaridade coseno</div><span class="sim-word">${getLabel(selected.word)}</span>`;
   sims.slice(0, 7).forEach(({ q, sim }) => {
     const pct = Math.round(Math.max(0, sim) * 100);
-    const qLabel = shortLabel(q.word, 20);
     html += `<div class="sim-row">
-      <span class="sim-name" style="color:${q.color}" title="${q.word}">${qLabel}</span>
+      <span class="sim-name" style="color:${q.color}" title="${q.word}">${getLabel(q.word)}</span>
       <div class="sim-bar-wrap"><div class="sim-bar-fill" style="width:${pct}%;background:${q.color}"></div></div>
       <span class="sim-num">${sim.toFixed(3)}</span>
     </div>`;
@@ -441,8 +424,7 @@ function renderTerms() {
   el.innerHTML = pts.map((p, i) => `
     <div class="term-item">
       <span class="term-dot" style="background:${p.color}"></span>
-      <span class="term-word" title="${p.word}">${shortLabel(p.word)}</span>
-      <span class="term-group">${p.group}</span>
+      <span class="term-word" title="${p.word}">${getLabel(p.word)}</span>
       <button class="term-rm" data-idx="${i}" onclick="removeByIdx(this)">×</button>
     </div>`).join('');
 }
@@ -466,12 +448,12 @@ function applyPoints(data) {
   draw();
 }
 
-async function addText(text, group) {
+async function addText(text) {
   setStatus('loading', 'gerando embedding…');
   document.getElementById('add-btn').disabled = true;
   try {
     const data = await apiFetch('POST', '/api/embed', {
-      terms: [{ word: text, group }]
+      terms: [{ word: text, group: 'custom' }]
     });
     applyPoints(data);
     setStatus('ready', `${pts.length} ponto${pts.length !== 1 ? 's' : ''}`);
@@ -488,6 +470,7 @@ async function removeTerm(word) {
   try {
     const data = await apiFetch('DELETE', `/api/term/${encodeURIComponent(word)}`);
     if (selected?.word === word) { selected = null; }
+    labelMap.delete(word);
     applyPoints(data);
     setStatus('ready', `${pts.length} ponto${pts.length !== 1 ? 's' : ''}`);
   } catch (e) {
@@ -504,7 +487,7 @@ async function clearAll() {
   setStatus('loading', 'limpando…');
   try {
     await apiFetch('DELETE', '/api/state');
-    pts = []; selected = null;
+    pts = []; selected = null; labelMap.clear();
     renderTerms(); updateSim(); draw();
     setStatus('ready', '0 pontos');
   } catch (e) {
@@ -514,13 +497,21 @@ async function clearAll() {
 
 // ── input handling ────────────────────────────────────────────────
 function submitInput() {
-  const input   = document.getElementById('term-input');
-  const group   = document.getElementById('group-select').value;
-  const raw     = input.value.trim();
+  const input    = document.getElementById('term-input');
+  const labelEl  = document.getElementById('label-input');
+  const raw      = input.value.trim();
+  const label    = labelEl.value.trim();
   if (!raw) return;
+  if (!label) {
+    labelEl.classList.add('error');
+    labelEl.focus();
+    setTimeout(() => labelEl.classList.remove('error'), 1200);
+    return;
+  }
+  labelMap.set(raw, label);
   input.value = '';
-  document.getElementById('label-input').value = '';
-  addText(raw, group);
+  labelEl.value = '';
+  addText(raw);
 }
 
 document.getElementById('add-btn').addEventListener('click', submitInput);
@@ -563,16 +554,16 @@ window.addEventListener('mousemove', e => {
     tip.style.display = 'block';
     tip.style.left = (e.clientX - r.left + 16) + 'px';
     tip.style.top  = (e.clientY - r.top  - 12) + 'px';
-    document.getElementById('tip-label').textContent   = shortLabel(hovered.word);
+    document.getElementById('tip-label').textContent = getLabel(hovered.word);
     const preview = hovered.word.replace(/\s+/g, ' ').trim();
     const tipPreviewEl = document.getElementById('tip-preview');
-    if (preview.length > 35) {
+    if (preview.length > 40) {
       tipPreviewEl.textContent = preview.slice(0, 60) + '…';
       tipPreviewEl.style.display = 'block';
     } else {
       tipPreviewEl.style.display = 'none';
     }
-    document.getElementById('tip-group').textContent = hovered.group;
+    document.getElementById('tip-group').style.display = 'none';
   } else { tip.style.display = 'none'; }
   draw();
 });
