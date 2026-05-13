@@ -45,8 +45,10 @@ def _reduce_3d(vecs: np.ndarray) -> np.ndarray:
         dist = (1.0 - sim) / 2.0
         return np.array([[-dist, 0.0, 0.0], [dist, 0.0, 0.0]])
     if n < 6:
-        from sklearn.decomposition import PCA
-        coords = PCA(n_components=3).fit_transform(vecs)
+        from sklearn.manifold import MDS
+        from sklearn.metrics.pairwise import cosine_distances
+        dist_matrix = cosine_distances(vecs)
+        coords = MDS(n_components=3, dissimilarity='precomputed', random_state=42).fit_transform(dist_matrix)
     else:
         import umap
         coords = umap.UMAP(
@@ -57,12 +59,11 @@ def _reduce_3d(vecs: np.ndarray) -> np.ndarray:
             random_state=42,
         ).fit_transform(vecs)
 
-    # Normalise to roughly [-1.5, 1.5] so it fits the canvas projection
-    for i in range(3):
-        col = coords[:, i]
-        span = col.max() - col.min()
-        if span > 0:
-            coords[:, i] = (col - col.mean()) / (span * 0.4)
+    # Uniform scaling across all axes — preserves relative distances between points
+    scale = max(coords[:, i].max() - coords[:, i].min() for i in range(3))
+    if scale > 0:
+        for i in range(3):
+            coords[:, i] = (coords[:, i] - coords[:, i].mean()) / (scale * 0.4)
     return coords
 
 
