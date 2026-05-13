@@ -8,19 +8,22 @@ app = FastAPI(title="Embedding Space 3D")
 
 MODELS: Dict[str, Dict] = {
     "multilingual": {
-        "id":   "paraphrase-multilingual-MiniLM-L12-v2",
+        "id":    "paraphrase-multilingual-MiniLM-L12-v2",
         "label": "Multilingual MiniLM",
         "hint":  "Multilingual · paragraphs & long texts",
+        "dims":  384,
     },
     "minilm": {
-        "id":   "all-MiniLM-L6-v2",
+        "id":    "all-MiniLM-L6-v2",
         "label": "MiniLM L6",
         "hint":  "English · terms & short phrases",
+        "dims":  384,
     },
     "mpnet": {
-        "id":   "all-mpnet-base-v2",
+        "id":    "all-mpnet-base-v2",
         "label": "MPNet",
         "hint":  "English · highest quality",
+        "dims":  768,
     },
 }
 
@@ -102,7 +105,7 @@ def _build_response(model_key: str) -> dict:
 def list_models():
     return {
         "models": [
-            {"key": k, "label": v["label"], "hint": v["hint"]}
+            {"key": k, "label": v["label"], "hint": v["hint"], "dims": v["dims"]}
             for k, v in MODELS.items()
         ]
     }

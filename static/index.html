@@ -262,9 +262,9 @@
       <p class="sim-empty">Adicione textos e clique num ponto para ver a similaridade coseno com os vizinhos.<br><br>Os embeddings são gerados por <em style="color:var(--accent2)">paraphrase-multilingual-MiniLM-L12-v2</em> (384D → UMAP 3D).</p>
     </div>
 
-    <div class="info-bar">
-      Modelo: <em>multilingual MiniLM</em> · <em>384D</em><br>
-      Redução: <em>UMAP coseno</em> · Similaridade: <em>coseno</em>
+    <div class="info-bar" id="info-bar">
+      Modelo: <em id="info-model">—</em> · <em id="info-dims">—</em><br>
+      Redução: <em>MDS / UMAP coseno</em> · Similaridade: <em>coseno</em>
     </div>
 
   </aside>
@@ -648,7 +648,10 @@ async function initModels() {
 }
 
 function updateModelHint(model) {
-  document.getElementById('model-hint').textContent = model ? model.hint : '';
+  if (!model) return;
+  document.getElementById('model-hint').textContent = model.hint;
+  document.getElementById('info-model').textContent = model.label;
+  document.getElementById('info-dims').textContent  = model.dims + 'D';
 }
 
 // ── init ──────────────────────────────────────────────────────────
