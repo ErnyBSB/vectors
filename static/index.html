@@ -42,6 +42,15 @@
   }
   .topbar-title { font-family: var(--serif); font-style: italic; font-size: 17px; letter-spacing: .01em; }
   .topbar-tag   { font-size: 10px; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; padding: 3px 8px; border: 1px solid var(--border2); border-radius: 4px; }
+
+  .model-select {
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 4px; color: var(--text); font-family: var(--mono);
+    font-size: 11px; padding: 4px 8px; outline: none; cursor: pointer;
+    transition: border-color .15s;
+  }
+  .model-select:focus { border-color: rgba(255,255,255,0.3); }
+  .model-hint { font-size: 10px; color: var(--muted); }
   .topbar-spacer { flex: 1; }
   .status {
     display: flex; align-items: center; gap: 6px;
@@ -195,6 +204,8 @@
     <span class="topbar-title">Espaço de Embeddings</span>
     <span class="topbar-tag">Real · UMAP · 3D</span>
     <span class="topbar-spacer"></span>
+    <select id="model-select" class="model-select"></select>
+    <span class="model-hint" id="model-hint"></span>
     <div class="status">
       <span class="status-dot" id="status-dot"></span>
       <span id="status-text">aguardando</span>
@@ -265,7 +276,12 @@ let pts = [], selected = null, hovered = null;
 let rotX = 0.42, rotY = 0.55, zoom = 1;
 let drag = false, lastMX = 0, lastMY = 0;
 let opts = { rotate: true, axes: true, lines: true, simlines: true };
-const labelMap = new Map(); // fullText → rótulo
+let currentModel = 'multilingual';
+const labelMaps = {};   // model key → Map(fullText → rótulo)
+function getLabelMap() {
+  if (!labelMaps[currentModel]) labelMaps[currentModel] = new Map();
+  return labelMaps[currentModel];
+}
 
 // ── canvas ────────────────────────────────────────────────────────
 const cv  = document.getElementById('cv');
@@ -275,7 +291,7 @@ const tip  = document.getElementById('tip');
 
 // ── helpers ───────────────────────────────────────────────────────
 function getLabel(word) {
-  return labelMap.get(word) || word;
+  return getLabelMap().get(word) || word;
 }
 
 // ── status ────────────────────────────────────────────────────────
@@ -453,7 +469,8 @@ async function addText(text) {
   document.getElementById('add-btn').disabled = true;
   try {
     const data = await apiFetch('POST', '/api/embed', {
-      terms: [{ word: text, group: 'custom' }]
+      terms: [{ word: text }],
+      model: currentModel,
     });
     applyPoints(data);
     setStatus('ready', `${pts.length} ponto${pts.length !== 1 ? 's' : ''}`);
@@ -468,9 +485,9 @@ async function addText(text) {
 async function removeTerm(word) {
   setStatus('loading', 'recalculando…');
   try {
-    const data = await apiFetch('DELETE', `/api/term/${encodeURIComponent(word)}`);
+    const data = await apiFetch('DELETE', `/api/term/${encodeURIComponent(word)}?model=${currentModel}`);
     if (selected?.word === word) { selected = null; }
-    labelMap.delete(word);
+    getLabelMap().delete(word);
     applyPoints(data);
     setStatus('ready', `${pts.length} ponto${pts.length !== 1 ? 's' : ''}`);
   } catch (e) {
@@ -486,8 +503,8 @@ function removeByIdx(btn) {
 async function clearAll() {
   setStatus('loading', 'limpando…');
   try {
-    await apiFetch('DELETE', '/api/state');
-    pts = []; selected = null; labelMap.clear();
+    await apiFetch('DELETE', `/api/state?model=${currentModel}`);
+    pts = []; selected = null; getLabelMap().clear();
     renderTerms(); updateSim(); draw();
     setStatus('ready', '0 pontos');
   } catch (e) {
@@ -508,7 +525,7 @@ function submitInput() {
     setTimeout(() => labelEl.classList.remove('error'), 1200);
     return;
   }
-  labelMap.set(raw, label);
+  getLabelMap().set(raw, label);
   input.value = '';
   labelEl.value = '';
   addText(raw);
@@ -606,9 +623,38 @@ window.addEventListener('resize', resize);
   requestAnimationFrame(loop);
 })();
 
+// ── model selector ────────────────────────────────────────────────
+async function initModels() {
+  try {
+    const data = await apiFetch('GET', '/api/models');
+    const sel = document.getElementById('model-select');
+    sel.innerHTML = data.models.map(m =>
+      `<option value="${m.key}">${m.label}</option>`
+    ).join('');
+    updateModelHint(data.models[0]);
+    sel.addEventListener('change', async e => {
+      const chosen = data.models.find(m => m.key === e.target.value);
+      currentModel = e.target.value;
+      updateModelHint(chosen);
+      selected = null;
+      setStatus('loading', 'trocando modelo…');
+      try {
+        const state = await apiFetch('GET', `/api/state?model=${currentModel}`);
+        applyPoints(state);
+        setStatus('ready', `${pts.length} ponto${pts.length !== 1 ? 's' : ''}`);
+      } catch(err) { setStatus('error', 'erro ao trocar modelo'); }
+    });
+  } catch(e) { console.error('could not load models', e); }
+}
+
+function updateModelHint(model) {
+  document.getElementById('model-hint').textContent = model ? model.hint : '';
+}
+
 // ── init ──────────────────────────────────────────────────────────
 resize();
 setStatus('ready', '0 pontos');
+initModels();
 </script>
 </body>
 </html>

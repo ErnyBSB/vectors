@@ -1,39 +1,40 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict
 import numpy as np
 
 app = FastAPI(title="Embedding Space 3D")
 
-# Model loaded lazily on first request
-_model = None
-
-def get_model():
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-    return _model
-
-# In-memory state for the session
-_state: List[dict] = []
-
-GROUP_COLORS = {
-    "animais":    "#5DCAA5",
-    "tecnologia": "#9d8ff5",
-    "culinária":  "#EF9F27",
-    "emoções":    "#e06fa0",
-    "custom":     "#c8f064",
+MODELS: Dict[str, Dict] = {
+    "multilingual": {
+        "id":   "paraphrase-multilingual-MiniLM-L12-v2",
+        "label": "Multilingual MiniLM",
+        "hint":  "Multilingual · paragraphs & long texts",
+    },
+    "minilm": {
+        "id":   "all-MiniLM-L6-v2",
+        "label": "MiniLM L6",
+        "hint":  "English · terms & short phrases",
+    },
+    "mpnet": {
+        "id":   "all-mpnet-base-v2",
+        "label": "MPNet",
+        "hint":  "English · highest quality",
+    },
 }
 
+_model_instances: Dict[str, object] = {}
+_states: Dict[str, List[dict]] = {k: [] for k in MODELS}
 
-class Term(BaseModel):
-    word: str
-    group: str = "custom"
 
-class AddRequest(BaseModel):
-    terms: List[Term]
+def get_model(key: str):
+    if key not in MODELS:
+        key = "multilingual"
+    if key not in _model_instances:
+        from sentence_transformers import SentenceTransformer
+        _model_instances[key] = SentenceTransformer(MODELS[key]["id"])
+    return _model_instances[key]
 
 
 def _reduce_3d(vecs: np.ndarray) -> np.ndarray:
@@ -67,54 +68,85 @@ def _reduce_3d(vecs: np.ndarray) -> np.ndarray:
     return coords
 
 
-def _build_response() -> dict:
-    if not _state:
-        return {"points": []}
-    vecs = np.array([s["vec"] for s in _state])
+def _build_response(model_key: str) -> dict:
+    state = _states[model_key]
+    if not state:
+        return {"points": [], "model": model_key}
+    vecs = np.array([s["vec"] for s in state])
     coords = _reduce_3d(vecs)
     return {
+        "model": model_key,
         "points": [
             {
                 "word":  s["word"],
-                "group": s["group"],
                 "color": s["color"],
                 "x": float(coords[i, 0]),
                 "y": float(coords[i, 1]),
                 "z": float(coords[i, 2]),
                 "vec":   s["vec"],
             }
-            for i, s in enumerate(_state)
+            for i, s in enumerate(state)
         ]
     }
 
 
+@app.get("/api/models")
+def list_models():
+    return {
+        "models": [
+            {"key": k, "label": v["label"], "hint": v["hint"]}
+            for k, v in MODELS.items()
+        ]
+    }
+
+
+@app.get("/api/state")
+def get_state(model: str = Query("multilingual")):
+    if model not in _states:
+        model = "multilingual"
+    return _build_response(model)
+
+
 @app.post("/api/embed")
-def add_terms(req: AddRequest):
-    existing = {s["word"] for s in _state}
+def add_terms(req: "AddRequest"):
+    key = req.model if req.model in _states else "multilingual"
+    state = _states[key]
+    existing = {s["word"] for s in state}
     new_terms = [t for t in req.terms if t.word not in existing]
     if new_terms:
-        model = get_model()
+        model = get_model(key)
         vecs = model.encode([t.word for t in new_terms], normalize_embeddings=True)
         for t, vec in zip(new_terms, vecs):
-            _state.append({
+            state.append({
                 "word":  t.word,
-                "group": t.group,
-                "color": GROUP_COLORS.get(t.group, "#c8f064"),
+                "color": "#c8f064",
                 "vec":   vec.tolist(),
             })
-    return _build_response()
+    return _build_response(key)
 
 
 @app.delete("/api/term/{word}")
-def remove_term(word: str):
-    _state[:] = [s for s in _state if s["word"] != word]
-    return _build_response()
+def remove_term(word: str, model: str = Query("multilingual")):
+    if model not in _states:
+        model = "multilingual"
+    _states[model][:] = [s for s in _states[model] if s["word"] != word]
+    return _build_response(model)
 
 
 @app.delete("/api/state")
-def clear_state():
-    _state.clear()
-    return {"points": []}
+def clear_state(model: str = Query("multilingual")):
+    if model not in _states:
+        model = "multilingual"
+    _states[model].clear()
+    return {"points": [], "model": model}
+
+
+class Term(BaseModel):
+    word: str
+
+class AddRequest(BaseModel):
+    terms: List[Term]
+    model: str = "multilingual"
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
