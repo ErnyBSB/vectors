@@ -28,6 +28,14 @@ _model_instances: Dict[str, object] = {}
 _states: Dict[str, List[dict]] = {k: [] for k in MODELS}
 
 
+class Term(BaseModel):
+    word: str
+
+class AddRequest(BaseModel):
+    terms: List[Term]
+    model: str = "multilingual"
+
+
 def get_model(key: str):
     if key not in MODELS:
         key = "multilingual"
@@ -108,7 +116,7 @@ def get_state(model: str = Query("multilingual")):
 
 
 @app.post("/api/embed")
-def add_terms(req: "AddRequest"):
+def add_terms(req: AddRequest):
     key = req.model if req.model in _states else "multilingual"
     state = _states[key]
     existing = {s["word"] for s in state}
@@ -139,14 +147,6 @@ def clear_state(model: str = Query("multilingual")):
         model = "multilingual"
     _states[model].clear()
     return {"points": [], "model": model}
-
-
-class Term(BaseModel):
-    word: str
-
-class AddRequest(BaseModel):
-    terms: List[Term]
-    model: str = "multilingual"
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
