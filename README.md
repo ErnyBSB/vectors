@@ -1,3 +1,5 @@
+# vectors
+Assessing vector embeddings techniques
 # Espaço de Embeddings 3D
 
 Visualização interativa de embeddings vetoriais em espaço 3D, com similaridade coseno em tempo real.
