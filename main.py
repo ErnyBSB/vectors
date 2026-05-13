@@ -41,7 +41,9 @@ def _reduce_3d(vecs: np.ndarray) -> np.ndarray:
     if n == 1:
         return np.zeros((1, 3))
     if n == 2:
-        return np.array([[-0.5, 0.0, 0.0], [0.5, 0.0, 0.0]])
+        sim = float(np.dot(vecs[0], vecs[1]))  # vecs are already normalized
+        dist = (1.0 - sim) / 2.0
+        return np.array([[-dist, 0.0, 0.0], [dist, 0.0, 0.0]])
     if n < 6:
         from sklearn.decomposition import PCA
         coords = PCA(n_components=3).fit_transform(vecs)
